@@ -123,17 +123,68 @@ static void test_dispatch_does_not_hold_lock_during_cb(void)
   TEST_ASSERT_TRUE(g_fake_backend.unlock_calls >= 1);
 }
 
+static void test_unsubscribe_stops_callback(void)
+{
+    cb_probe_t probe = {0};
+
+    evt_sub_handle_t h = evt_bus_subscribe((evt_id_t)5, cb_probe, &probe);
+    TEST_ASSERT_NOT_EQUAL(EVT_HANDLE_ID_INVALID, h.id);
+
+    TEST_ASSERT_TRUE(evt_bus_publish((evt_id_t)5, NULL, 0));
+    evt_bus_dispatch_evt(&g_fake_backend.last_evt);
+    TEST_ASSERT_EQUAL_INT(1, probe.calls);
+
+    evt_bus_unsubscribe(h);
+
+    TEST_ASSERT_TRUE(evt_bus_publish((evt_id_t)5, NULL, 0));
+    evt_bus_dispatch_evt(&g_fake_backend.last_evt);
+    TEST_ASSERT_EQUAL_INT(1, probe.calls); /* unchanged */
+}
+
+static void test_unsubscribe_stale_handle_does_not_affect_new_sub(void)
+{
+    cb_probe_t probe1 = {0};
+    cb_probe_t probe2 = {0};
+
+    evt_sub_handle_t h1 = evt_bus_subscribe((evt_id_t)6, cb_probe, &probe1);
+    TEST_ASSERT_NOT_EQUAL(EVT_HANDLE_ID_INVALID, h1.id);
+
+    evt_bus_unsubscribe(h1);
+
+    evt_sub_handle_t h2 = evt_bus_subscribe((evt_id_t)6, cb_probe, &probe2);
+    TEST_ASSERT_NOT_EQUAL(EVT_HANDLE_ID_INVALID, h2.id);
+
+    TEST_ASSERT_TRUE(evt_bus_publish((evt_id_t)6, NULL, 0));
+    evt_bus_dispatch_evt(&g_fake_backend.last_evt);
+
+    TEST_ASSERT_EQUAL_INT(0, probe1.calls);
+    TEST_ASSERT_EQUAL_INT(1, probe2.calls);
+}
+
+static void test_unsubscribe_invalid_handle_safe(void)
+{
+    evt_sub_handle_t invalid = { .id = EVT_HANDLE_ID_INVALID, .gen = 0 };
+    evt_bus_unsubscribe(invalid);
+    /* Should not crash */
+}
+
+/* --------------------------------- Runner --------------------------------- */
 /* Main */
 int main(void)
 {
-  UNITY_BEGIN();
+    UNITY_BEGIN();
 
-  RUN_TEST(test_subscribe_and_dispatch_calls_cb);
-  RUN_TEST(test_user_ctx_is_passed);
-  RUN_TEST(test_payload_is_visible_to_cb);
-  RUN_TEST(test_publish_rejects_null_payload_with_nonzero_len);
-  RUN_TEST(test_publish_rejects_len_gt_inline_max);
-  RUN_TEST(test_dispatch_does_not_hold_lock_during_cb);
+    RUN_TEST(test_subscribe_and_dispatch_calls_cb);
+    RUN_TEST(test_user_ctx_is_passed);
+    RUN_TEST(test_payload_is_visible_to_cb);
+    RUN_TEST(test_publish_rejects_null_payload_with_nonzero_len);
+    RUN_TEST(test_publish_rejects_len_gt_inline_max);
+    RUN_TEST(test_dispatch_does_not_hold_lock_during_cb);
+
+    RUN_TEST(test_unsubscribe_stops_callback);
+    RUN_TEST(test_unsubscribe_stale_handle_does_not_affect_new_sub);
+    RUN_TEST(test_unsubscribe_invalid_handle_safe);
+
 
   return UNITY_END();
 }
