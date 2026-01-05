@@ -168,6 +168,69 @@ static void test_unsubscribe_invalid_handle_safe(void)
     /* Should not crash */
 }
 
+static void test_subscribe_reclaims_stale_slot(void)
+{
+    cb_probe_t probes[EVT_BUS_MAX_SUBSCRIBERS_PER_EVT] = {0};
+    evt_sub_handle_t hs[EVT_BUS_MAX_SUBSCRIBERS_PER_EVT];
+
+    const evt_id_t E = (evt_id_t)7;
+
+    /* Fill all slots for this event */
+    for (size_t i = 0; i < EVT_BUS_MAX_SUBSCRIBERS_PER_EVT; i++) {
+        hs[i] = evt_bus_subscribe(E, cb_probe, &probes[i]);
+        TEST_ASSERT_NOT_EQUAL(EVT_HANDLE_ID_INVALID, hs[i].id);
+    }
+
+    /* Next subscribe should fail (no slots) */
+    evt_sub_handle_t h_fail = evt_bus_subscribe(E, cb_probe, NULL);
+    TEST_ASSERT_EQUAL(EVT_HANDLE_ID_INVALID, h_fail.id);
+
+    /* Unsubscribe one (makes its slot stale) */
+    evt_bus_unsubscribe(hs[0]);
+
+    /* Now subscribe should succeed if we reclaimed the stale slot */
+    cb_probe_t probe_new = {0};
+    evt_sub_handle_t h_new = evt_bus_subscribe(E, cb_probe, &probe_new);
+    TEST_ASSERT_NOT_EQUAL(EVT_HANDLE_ID_INVALID, h_new.id);
+
+    /* Dispatch and ensure the new one is called */
+    TEST_ASSERT_TRUE(evt_bus_publish(E, NULL, 0));
+    evt_bus_dispatch_evt(&g_fake_backend.last_evt);
+    TEST_ASSERT_EQUAL_INT(1, probe_new.calls);
+}
+
+static void test_dispatch_reclaims_stale_slot_then_subscribe_succeeds(void)
+{
+    const evt_id_t E = (evt_id_t)8;
+
+    cb_probe_t probes[EVT_BUS_MAX_SUBSCRIBERS_PER_EVT] = {0};
+    evt_sub_handle_t hs[EVT_BUS_MAX_SUBSCRIBERS_PER_EVT];
+
+    /* Fill all slots for E */
+    for (size_t i = 0; i < EVT_BUS_MAX_SUBSCRIBERS_PER_EVT; i++) {
+        hs[i] = evt_bus_subscribe(E, cb_probe, &probes[i]);
+        TEST_ASSERT_NOT_EQUAL_MESSAGE(EVT_HANDLE_ID_INVALID, hs[i].id, "fill: handle invalid");
+    }
+
+    /* Unsubscribe one -> leaves a stale slot in subscriptions[E] */
+    evt_bus_unsubscribe(hs[0]);
+
+    /* Trigger dispatch once to self-heal stale slots for E */
+    TEST_ASSERT_TRUE_MESSAGE(evt_bus_publish(E, NULL, 0), "publish failed");
+    evt_bus_dispatch_evt(&g_fake_backend.last_evt);
+
+    /* Now a new subscribe should succeed if dispatch-time healing reclaimed a slot */
+    cb_probe_t probe_new = {0};
+    evt_sub_handle_t h_new = evt_bus_subscribe(E, cb_probe, &probe_new);
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(EVT_HANDLE_ID_INVALID, h_new.id, "subscribe did not reclaim slot");
+
+    /* And it should be callable */
+    TEST_ASSERT_TRUE(evt_bus_publish(E, NULL, 0));
+    evt_bus_dispatch_evt(&g_fake_backend.last_evt);
+    TEST_ASSERT_EQUAL_INT(1, probe_new.calls);
+}
+
+
 /* --------------------------------- Runner --------------------------------- */
 /* Main */
 int main(void)
@@ -184,6 +247,8 @@ int main(void)
     RUN_TEST(test_unsubscribe_stops_callback);
     RUN_TEST(test_unsubscribe_stale_handle_does_not_affect_new_sub);
     RUN_TEST(test_unsubscribe_invalid_handle_safe);
+    RUN_TEST(test_subscribe_reclaims_stale_slot);
+    RUN_TEST(test_dispatch_reclaims_stale_slot_then_subscribe_succeeds);
 
 
   return UNITY_END();
