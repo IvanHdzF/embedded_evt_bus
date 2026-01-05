@@ -20,7 +20,7 @@ bool evt_bus_publish(evt_id_t evt_id, const void *payload, size_t payload_len);
 
 /* Dispatch helpers (called by the platform binding / user loop). */
 void evt_bus_dispatch_evt(const evt_t *evt); /* dispatch single event */
-void evt_bus_dispatch_all(void);   /* drains until empty */
+
 
 #ifdef __cplusplus
 }
