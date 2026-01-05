@@ -6,107 +6,182 @@ Deterministic, zero-heap event bus for embedded systems: **publish = enqueue**, 
 
 ## Description
 
-`evt_bus` is a small pub/sub middleware intended for firmware and other resource-constrained systems.
+`evt_bus` is a small publish/subscribe middleware intended for firmware and other resource‑constrained systems.
 
 Key properties:
 - **No heap**: fixed-size tables and bounded queue
-- **Deterministic** runtime: bounded fanout (`MAX_SUBS_PER_EVT`)
+- **Deterministic runtime**: bounded fanout (`MAX_SUBS_PER_EVT`)
 - **Thread-friendly**: publishers never execute callbacks
 - **Safe handles**: index + generation to avoid stale-handle reuse bugs
 - **Self-healing**: stale handles are cleared during dispatch/subscribe
 - **Portable core**: core does not depend on any RTOS headers/types
-- **Ports**: optional bindings can provide queue + dispatcher task integration (e.g. FreeRTOS)
+- **Ports**: optional bindings provide queue + dispatcher task integration (e.g. FreeRTOS)
 
 ---
 
-## Usage
+## Repository Structure
+
+```
+.
+├── include/
+│   └── evt_bus/
+│       ├── evt_bus.h
+│       ├── evt_bus_types.h
+│       └── evt_bus_config.h
+├── src/
+│   └── evt_bus.c
+├── ports/
+│   └── freertos/        # (optional, future)
+├── tests/
+│   ├── test_evt_bus.c
+│   ├── fake_evt_bus_backend.c
+│   └── test_helpers.h
+├── externals/
+│   └── unity/           # Unity test framework (git submodule)
+├── docs/
+│   └── DESIGN.md
+├── CMakeLists.txt
+└── Makefile
+```
+
+---
+
+## Configuration
 
 ### 1) Configure `evt_bus_config.h`
+
 You can either:
 - edit the provided `include/evt_bus/evt_bus_config.h`, or
-- provide your own `evt_bus_config.h` earlier in the include path (recommended), following the template.
+- provide your own `evt_bus_config.h` earlier in the include path (recommended).
 
-Typical config knobs:
-- `EVT_BUS_MAX_EVT`
+Typical configuration knobs:
+- `EVT_BUS_MAX_EVT_IDS`
 - `EVT_BUS_MAX_HANDLES`
-- `EVT_BUS_MAX_SUBS_PER_EVT`
+- `EVT_BUS_MAX_SUBSCRIBERS_PER_EVT`
 - `EVT_BUS_QUEUE_DEPTH`
-- `EVT_BUS_MAX_PAYLOAD_SIZE` (if using copy-in payloads)
+- `EVT_INLINE_MAX`
 
-### 2) Include and initialize
+---
+
+## Basic Usage
+
+### Initialize
+
 ```c
 #include "evt_bus/evt_bus.h"
 
 void app_init(void)
 {
-  evt_bus_init();
+    evt_bus_init();
 }
 ```
 
-### 3) Subscribe / publish
+### Subscribe and Publish
+
 ```c
-static void on_my_event(evt_id_t evt, const void* payload, size_t len)
+static void on_my_event(const evt_t *evt, void *ctx)
 {
-  (void)evt; (void)payload; (void)len;
-  /* ... */
+    (void)ctx;
+    /* process evt->payload / evt->len */
 }
 
 void app_setup(void)
 {
-  evt_handle_t h = evt_bus_subscribe(MY_EVT_ID, on_my_event);
-  (void)h;
+    evt_sub_handle_t h =
+        evt_bus_subscribe(MY_EVT_ID, on_my_event, NULL);
+    (void)h;
 }
 
 void app_do_something(void)
 {
-  const uint32_t x = 123;
-  (void)evt_bus_publish(MY_EVT_ID, &x, sizeof(x));
+    const uint32_t x = 123;
+    evt_bus_publish(MY_EVT_ID, &x, sizeof(x));
 }
 ```
-
-### 4) Dispatch
-You must run the dispatcher logic in **one dedicated context** (thread/task or main loop).
-
-- Bare-metal / polling:
-```c
-for (;;)
-{
-  evt_bus_dispatch_all();
-  /* ... other work ... */
-}
-```
-
-- RTOS: create a task/thread that blocks (via port) and runs the dispatch loop.
 
 ---
 
-## Porting OS
+## Dispatching Events
+
+The event bus does **not** create threads by itself.
+
+You must run dispatching in **one dedicated context**:
+
+- **Bare-metal / polling**:
+  - dequeue events from your backend
+  - call `evt_bus_dispatch_evt(&evt)`
+
+- **RTOS**:
+  - create a dispatcher task
+  - block on the queue
+  - call `evt_bus_dispatch_evt()` for each dequeued event
+
+Ports may provide helpers for this (see below).
+
+---
+
+## OS Ports
 
 The project is split into:
-- **Core**: `src/evt_bus_core.c` (portable, no RTOS dependencies)
-- **Ports**: `ports/<os>/...` (queue backend, blocking wait, task creation convenience)
+- **Core**: portable, RTOS-agnostic logic
+- **Ports**: optional OS-specific bindings
 
-### What a port typically provides
-- enqueue / dequeue backend (often a bounded queue)
-- blocking wait for events (optional)
-- dispatcher task/thread wrapper (optional convenience)
-- ISR-safe publish helper (optional, OS dependent)
-- lock/critical-section mapping (if required by your integration)
+A port typically provides:
+- bounded queue backend
+- blocking dequeue
+- dispatcher task wrapper (optional)
+- ISR-safe publish helper (optional)
+- lock / critical-section mapping (optional)
 
 ### FreeRTOS (example)
-If using the FreeRTOS port, you typically:
-- init the port (queue depth, task cfg)
-- start the dispatcher task
-- use normal `evt_bus_publish()` (and optional `publish_from_isr()`)
 
-> See `ports/freertos/` for details.
+A FreeRTOS port would typically:
+- create a queue (`xQueueCreate`)
+- start a dispatcher task
+- use `evt_bus_publish()` from tasks
+- optionally expose `evt_bus_publish_from_isr()`
+
+> See `ports/freertos/` (to be added).
+
+---
+
+## Running Tests (Unity)
+
+### 1) Initialize submodules
+
+Unity is included as a git submodule:
+
+```sh
+git submodule update --init --recursive
+```
+
+### 2) Build and run tests
+
+Using the provided Makefile:
+
+```sh
+make test
+```
+
+Or manually with CMake:
+
+```sh
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build
+```
+
+All core behavior (subscribe, publish, dispatch, unsubscribe, self-healing)
+is covered by unit tests.
 
 ---
 
 ## Documentation
-- `docs/DESIGN.md` for architecture + semantics
+
+- `docs/DESIGN.md` — detailed architecture, semantics, and guarantees
 
 ---
 
 ## License
+
 MIT

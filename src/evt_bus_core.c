@@ -175,14 +175,6 @@ bool evt_bus_publish(evt_id_t evt_id, const void *payload, size_t payload_len){
 }
 
 
-/* Core dispatch: called by the port-side dispatcher thread after dequeueing an evt_t.
- *
- * Assumptions (per your “slots live under evt_id” design):
- * - subscriptions[evt_id] owns the subscriber slots (no global handle pool).
- * - Each slot has: cb, active, gen (gen is mainly for unsubscribe stale-handle protection).
- * - publish() enqueues only evt_t; dispatch() fans out to all active slots.
- * - Optional locking is provided by evt_bus_backend.lock/unlock (can be NULL).
- */
 
 void evt_bus_dispatch_evt(const evt_t *evt)
 {
