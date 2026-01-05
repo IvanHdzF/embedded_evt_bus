@@ -23,7 +23,7 @@ extern "C" {
 #include "evt_bus/evt_bus_config.h"
 
 typedef uint16_t evt_id_t;
-typedef uint16_t mod_id_t;
+typedef uint16_t hndl_id_t;
 
 #define EVT_HANDLE_ID_INVALID 0xFFFFu
 
@@ -35,7 +35,7 @@ typedef struct {
 
 
 typedef struct __attribute__((packed)) {
-  evt_id_t id;
+  hndl_id_t id;
   uint16_t gen; /* generated count */
 } evt_sub_handle_t;
 
