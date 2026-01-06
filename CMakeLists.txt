@@ -8,7 +8,7 @@ project(evt_bus
 # ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------
-option(EVT_BUS_BUILD_TESTS       "Build unit tests (Unity)" ON)
+option(EVT_BUS_BUILD_TESTS       "Build unit tests (Unity)" OFF)
 option(EVT_BUS_ENABLE_FREERTOS   "Build FreeRTOS port"      OFF)
 option(EVT_BUS_FREERTOS_STUB     "Use stub FreeRTOS headers to compile port" OFF)
 
@@ -77,9 +77,9 @@ if(EVT_BUS_ENABLE_FREERTOS)
       ${CMAKE_CURRENT_LIST_DIR}/tests/freertos_stub
     )
   else()
-    if(NOT DEFINED FREERTOS_INCLUDE_DIRS)
+    if(FREERTOS_INCLUDE_DIRS STREQUAL "")
       message(FATAL_ERROR
-        "FREERTOS_INCLUDE_DIRS not set. Provide -DFREERTOS_INCLUDE_DIRS=... or enable EVT_BUS_FREERTOS_STUB."
+        "FREERTOS_INCLUDE_DIRS not set. Provide FREERTOS_INC=... or enable EVT_BUS_FREERTOS_STUB."
       )
     endif()
     target_include_directories(evt_bus_port_freertos PUBLIC ${FREERTOS_INCLUDE_DIRS})

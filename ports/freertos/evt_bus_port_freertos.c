@@ -4,6 +4,7 @@
 #include "FreeRTOS.h"
 #include "queue.h"
 #include "task.h"
+#include "semphr.h"
 
 #include "evt_bus/evt_bus.h"
 #include "evt_bus/evt_bus_config.h"
