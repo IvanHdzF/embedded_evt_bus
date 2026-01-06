@@ -58,6 +58,9 @@ typedef struct {
   void (*lock)(void* ctx);
   void (*unlock)(void* ctx);
 
+  /* Optional: backend init function (NULL if not used). */
+  bool (*init)(void);
+
 } evt_bus_backend_t;
 
 /* Callback signature: runs on event-bus task context */

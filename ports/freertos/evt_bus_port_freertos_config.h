@@ -2,7 +2,7 @@
 
 #define PORTS_FREERTOS_EVT_BUS_PORT_FREERTOS_CONFIG_H_
 
-#include "FreeRTOS.h"
+#include "freertos/FreeRTOS.h"
 
 /* FreeRTOS-specific configuration for the Event Bus port */
 
@@ -18,7 +18,7 @@
 #endif
 /* Stack size (in words) of the FreeRTOS task that runs the event bus dispatcher */
 #ifndef EVT_BUS_FREERTOS_STACK_WORDS
-#define EVT_BUS_FREERTOS_STACK_WORDS (configMINIMAL_STACK_SIZE + 128)
+#define EVT_BUS_FREERTOS_STACK_WORDS (4096 + 128)
 #endif
 
 #endif /* PORTS_FREERTOS_EVT_BUS_PORT_FREERTOS_CONFIG_H_ */

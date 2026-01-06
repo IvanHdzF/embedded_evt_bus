@@ -1,10 +1,10 @@
 #include "evt_bus_port_freertos.h"
 #include "evt_bus_port_freertos_config.h"
 
-#include "FreeRTOS.h"
-#include "queue.h"
-#include "task.h"
-#include "semphr.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
 
 #include "evt_bus/evt_bus.h"
 #include "evt_bus/evt_bus_config.h"
@@ -36,7 +36,16 @@ typedef struct {
 static freertos_backend_ctx_t s_ctx;
 
 /* Core references this symbol (declared extern in core .c) */
-evt_bus_backend_t evt_bus_backend;
+evt_bus_backend_t evt_bus_backend = {
+  .ctx          = NULL,
+  .enqueue      = NULL,
+  .dequeue_nb   = NULL,
+  .dequeue_block= NULL,
+  .enqueue_isr  = NULL,
+  .lock         = NULL,
+  .unlock       = NULL,
+  .init         = evt_bus_freertos_init,
+};
 
 /* -------- Backend function implementations -------- */
 

@@ -79,6 +79,15 @@ void evt_bus_init(void){
     assert((evt_bus_backend.lock == NULL) == (evt_bus_backend.unlock == NULL)
        && "evt_bus_backend lock/unlock must both be NULL or both non-NULL");
 
+    /* Check for init function provided in port */
+    if (evt_bus_backend.init != NULL) {
+        bool ok = evt_bus_backend.init();
+        assert(ok && "evt_bus_backend init failed");
+    } else {
+        /* No init function: assume no further initialization in port needed */
+    }
+    assert(EVT_BUS_MAX_HANDLES > 0 && "EVT_BUS_MAX_HANDLES must be > 0");
+
     /* Initialize subscriber pool */
     for (size_t i = 0; i < EVT_BUS_MAX_HANDLES; i++){
         subscriber_pool[i].cb = NULL;
