@@ -8,64 +8,90 @@ project(evt_bus
 # ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------
-option(EVT_BUS_BUILD_SHARED "Build evt_bus as a shared library" OFF)
-option(EVT_BUS_BUILD_TESTS  "Build unit tests (Unity)"          ON)
+option(EVT_BUS_BUILD_TESTS       "Build unit tests (Unity)" ON)
+option(EVT_BUS_ENABLE_FREERTOS   "Build FreeRTOS port"      OFF)
+option(EVT_BUS_FREERTOS_STUB     "Use stub FreeRTOS headers to compile port" OFF)
+
+# Provided by user when EVT_BUS_ENABLE_FREERTOS=ON and STUB=OFF:
+#   -DFREERTOS_INCLUDE_DIRS="path1;path2;..."
+set(FREERTOS_INCLUDE_DIRS "" CACHE STRING "FreeRTOS include dirs (semicolon-separated)")
+set(FREERTOS_LIBS         "" CACHE STRING "Optional FreeRTOS libs/targets to link")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 # ---------------------------------------------------------------------------
-# Library target
+# Core library (RTOS-agnostic)
 # ---------------------------------------------------------------------------
-set(EVT_BUS_SOURCES
+add_library(evt_bus_core STATIC
   src/evt_bus_core.c
-  src/evt_bus_port.c
 )
+add_library(evt_bus::core ALIAS evt_bus_core)
 
-if (EVT_BUS_BUILD_SHARED)
-  add_library(evt_bus SHARED ${EVT_BUS_SOURCES})
-else()
-  add_library(evt_bus STATIC ${EVT_BUS_SOURCES})
-endif()
-
-add_library(evt_bus::evt_bus ALIAS evt_bus)
-
-target_include_directories(evt_bus
+target_include_directories(evt_bus_core
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
 
-
-target_compile_options(evt_bus PRIVATE
+target_compile_options(evt_bus_core PRIVATE
   -Wall -Wextra -Wpedantic
 )
 
-# If you want consumers to be able to override these at compile time:
-# target_compile_definitions(evt_bus PUBLIC EVT_INLINE_MAX=16 EVT_BUS_MAX_EVT_IDS=64)
+# ---------------------------------------------------------------------------
+# Public "evt_bus" target (wrapper)
+# Consumers link evt_bus::evt_bus and get core + selected port.
+# ---------------------------------------------------------------------------
+add_library(evt_bus INTERFACE)
+add_library(evt_bus::evt_bus ALIAS evt_bus)
+
+target_link_libraries(evt_bus INTERFACE evt_bus_core)
+target_include_directories(evt_bus INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
 
 # ---------------------------------------------------------------------------
-# Install (optional but nice if you want to reuse in other repos)
+# FreeRTOS port (optional)
 # ---------------------------------------------------------------------------
-include(GNUInstallDirs)
+if(EVT_BUS_ENABLE_FREERTOS)
+  add_library(evt_bus_port_freertos STATIC
+    ports/freertos/evt_bus_port_freertos.c
+  )
+  add_library(evt_bus::freertos ALIAS evt_bus_port_freertos)
 
-install(TARGETS evt_bus
-  EXPORT evt_busTargets
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
+  target_link_libraries(evt_bus_port_freertos PUBLIC evt_bus_core)
 
-install(DIRECTORY include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
+  target_include_directories(evt_bus_port_freertos PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/ports/freertos>
+  )
 
-install(EXPORT evt_busTargets
-  FILE evt_busTargets.cmake
-  NAMESPACE evt_bus::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/evt_bus
-)
+  target_compile_options(evt_bus_port_freertos PRIVATE
+    -Wall -Wextra -Wpedantic
+  )
+
+  if(EVT_BUS_FREERTOS_STUB)
+    target_include_directories(evt_bus_port_freertos PUBLIC
+      ${CMAKE_CURRENT_LIST_DIR}/tests/freertos_stub
+    )
+  else()
+    if(NOT DEFINED FREERTOS_INCLUDE_DIRS)
+      message(FATAL_ERROR
+        "FREERTOS_INCLUDE_DIRS not set. Provide -DFREERTOS_INCLUDE_DIRS=... or enable EVT_BUS_FREERTOS_STUB."
+      )
+    endif()
+    target_include_directories(evt_bus_port_freertos PUBLIC ${FREERTOS_INCLUDE_DIRS})
+
+    if(DEFINED FREERTOS_LIBS)
+      target_link_libraries(evt_bus_port_freertos PUBLIC ${FREERTOS_LIBS})
+    endif()
+  endif()
+
+  # Pull port into public wrapper
+  target_link_libraries(evt_bus INTERFACE evt_bus_port_freertos)
+endif()
 
 # ---------------------------------------------------------------------------
 # Tests (Unity)
@@ -73,25 +99,22 @@ install(EXPORT evt_busTargets
 if (EVT_BUS_BUILD_TESTS)
   enable_testing()
 
-  # Build Unity as a tiny static lib
   add_library(unity STATIC
     ${CMAKE_CURRENT_LIST_DIR}/externals/unity/src/unity.c
   )
-
   target_include_directories(unity PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/externals/unity/src
   )
-
   target_compile_options(unity PRIVATE -Wall -Wextra -Wpedantic)
 
-  # Unit test executable
   add_executable(test_evt_bus
     tests/test_evt_bus.c
     tests/fake_evt_bus_backend.c
   )
 
+  # IMPORTANT: link to core, not the public wrapper (which may pull ports)
   target_link_libraries(test_evt_bus PRIVATE
-    evt_bus
+    evt_bus_core
     unity
   )
 
