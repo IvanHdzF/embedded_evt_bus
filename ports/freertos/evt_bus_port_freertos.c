@@ -22,10 +22,8 @@
 #define EVT_BUS_FREERTOS_STACK_WORDS (configMINIMAL_STACK_SIZE + 128)
 #endif
 
-/* If you want to control queue depth from config.h, reuse EVT_BUS_QUEUE_DEPTH.
-   Otherwise define a port-local default. */
-#ifndef EVT_BUS_QUEUE_DEPTH
-#define EVT_BUS_QUEUE_DEPTH 16u
+#ifndef EVT_BUS_FREERTOS_QUEUE_DEPTH
+#define EVT_BUS_FREERTOS_QUEUE_DEPTH 16u
 #endif
 
 /* ---- Heartbeat (port-owned) ----------------------------------------------- */
@@ -128,7 +126,7 @@ static void fr_unlock(void *ctx)
 bool evt_bus_freertos_init(void)
 {
   /* Create queue before wiring backend */
-  s_ctx.q = xQueueCreate((UBaseType_t)EVT_BUS_QUEUE_DEPTH, (UBaseType_t)sizeof(evt_t));
+  s_ctx.q = xQueueCreate((UBaseType_t)EVT_BUS_FREERTOS_QUEUE_DEPTH, (UBaseType_t)sizeof(evt_t));
   if (s_ctx.q == NULL) return false;
 
   s_mtx = xSemaphoreCreateMutexStatic(&s_mtx_buf);
