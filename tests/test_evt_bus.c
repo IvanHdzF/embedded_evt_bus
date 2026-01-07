@@ -230,6 +230,45 @@ static void test_dispatch_reclaims_stale_slot_then_subscribe_succeeds(void)
     TEST_ASSERT_EQUAL_INT(1, probe_new.calls);
 }
 
+static void test_unsubscribe_stale_handle_is_noop_and_does_not_affect_new_sub(void)
+{
+    cb_probe_t probe1 = {0};
+    cb_probe_t probe2 = {0};
+
+    const evt_id_t E = (evt_id_t)6;
+
+    /* Step 1: subscribe -> h1 */
+    evt_sub_handle_t h1 = evt_bus_subscribe(E, cb_probe, &probe1);
+    TEST_ASSERT_NOT_EQUAL(EVT_HANDLE_ID_INVALID, h1.id);
+
+    /* Step 2: unsubscribe -> h1 becomes stale */
+    evt_bus_unsubscribe(h1);
+
+    /* Step 3: subscribe again -> h2 */
+    evt_sub_handle_t h2 = evt_bus_subscribe(E, cb_probe, &probe2);
+    TEST_ASSERT_NOT_EQUAL(EVT_HANDLE_ID_INVALID, h2.id);
+
+    /* Optional (but very useful) sanity checks:
+     * - If your allocator reuses the same slot, id should match and gen should differ.
+     * - If allocator does NOT reuse immediately, the core property still holds.
+     */
+    if (h2.id == h1.id) {
+        TEST_ASSERT_NOT_EQUAL_MESSAGE(h1.gen, h2.gen, "expected generation bump on slot reuse");
+    }
+
+    /* Step 4: attempt to unsubscribe with stale handle h1:
+     * MUST be NO-OP and MUST NOT unsubscribe h2.
+     */
+    evt_bus_unsubscribe(h1);
+
+    /* Step 5: publish+dispatch -> probe2 must still be called */
+    TEST_ASSERT_TRUE(evt_bus_publish(E, NULL, 0));
+    evt_bus_dispatch_evt(&g_fake_backend.last_evt);
+
+    TEST_ASSERT_EQUAL_INT(0, probe1.calls);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, probe2.calls, "stale unsubscribe likely nuked the new subscriber");
+}
+
 
 /* --------------------------------- Runner --------------------------------- */
 /* Main */
@@ -249,6 +288,7 @@ int main(void)
     RUN_TEST(test_unsubscribe_invalid_handle_safe);
     RUN_TEST(test_subscribe_reclaims_stale_slot);
     RUN_TEST(test_dispatch_reclaims_stale_slot_then_subscribe_succeeds);
+    RUN_TEST(test_unsubscribe_stale_handle_is_noop_and_does_not_affect_new_sub);
 
 
   return UNITY_END();

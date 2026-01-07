@@ -133,15 +133,31 @@ A port typically provides:
 - ISR-safe publish helper (optional)
 - lock / critical-section mapping (optional)
 
-### FreeRTOS (example)
+### FreeRTOS
 
-A FreeRTOS port would typically:
-- create a queue (`xQueueCreate`)
-- start a dispatcher task
-- use `evt_bus_publish()` from tasks
-- optionally expose `evt_bus_publish_from_isr()`
+`ports/freertos/` provides a thin backend implementation using the FreeRTOS queue + a dispatcher task.
 
-> See `ports/freertos/` (to be added).
+**Important:** this repository does **not** vendor FreeRTOS. The FreeRTOS port is intended to be built **inside a consumer project** that already has FreeRTOS configured.
+
+Your application must provide the normal FreeRTOS include environment, including:
+
+- `FreeRTOS.h`
+- `FreeRTOSConfig.h` (application/project-specific)
+- `portmacro.h` (comes from the selected FreeRTOS *portable* layer)
+
+In other words: if your FreeRTOS app already builds, adding `evt_bus` + enabling the FreeRTOS port should “just work”.
+
+**This repo only validates:**
+- core behavior via Unity unit tests (`make test`)
+- optional host compile-check of the FreeRTOS port using stub headers (no real RTOS runtime)
+
+> See `ports/freertos/` for the port implementation.
+
+#### Build selection (CMake)
+
+- FreeRTOS port: build `evt_bus_port_freertos` (consumer must supply FreeRTOS headers/config)
+
+This project intentionally does not attempt to build FreeRTOS itself.
 
 ---
 

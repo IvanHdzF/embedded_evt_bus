@@ -1,8 +1,6 @@
 #include "evt_bus/evt_bus.h"
 #include "evt_bus/evt_bus_config.h"
 
-//TODO: Add necessary includes for backend implementation (e.g., evt_bus_port_freertos)
-
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -79,6 +77,15 @@ void evt_bus_init(void){
     assert((evt_bus_backend.lock == NULL) == (evt_bus_backend.unlock == NULL)
        && "evt_bus_backend lock/unlock must both be NULL or both non-NULL");
 
+    /* Check for init function provided in port */
+    if (evt_bus_backend.init != NULL) {
+        bool ok = evt_bus_backend.init();
+        assert(ok && "evt_bus_backend init failed");
+    } else {
+        /* No init function: assume no further initialization in port needed */
+    }
+    assert(EVT_BUS_MAX_HANDLES > 0 && "EVT_BUS_MAX_HANDLES must be > 0");
+
     /* Initialize subscriber pool */
     for (size_t i = 0; i < EVT_BUS_MAX_HANDLES; i++){
         subscriber_pool[i].cb = NULL;
@@ -140,6 +147,16 @@ void evt_bus_unsubscribe(evt_sub_handle_t handle){
         return;
     }
 
+    if (subscriber_pool[handle.id].cb == NULL){
+        /* Stale handle */
+        return;
+    }
+
+    if (subscriber_pool[handle.id].handle.gen != handle.gen){
+        /* Stale handle */
+        return;
+    }
+
     evt_bus_backend.lock(evt_bus_backend.ctx);
     /* Remove from subscription slots */
     subscriber_pool[handle.id].cb = NULL;
@@ -165,16 +182,50 @@ bool evt_bus_publish(evt_id_t evt_id, const void *payload, size_t payload_len){
         return false;
     }
 
+    if (evt_bus_backend.enqueue == NULL) {
+        return false;
+    }
+
     evt_t evt = {0};
     evt.id = evt_id;
     evt.len = (uint16_t)payload_len;
-    memcpy(evt.payload, payload, payload_len);
+    if (payload_len) {
+        memcpy(evt.payload, payload, payload_len);
+    }
 
     /* Send callback to dispatcher queue */
     return evt_bus_backend.enqueue(&evt);
 }
 
+bool evt_bus_publish_from_isr(evt_id_t evt_id, const void *payload, size_t payload_len)
+{
+    /* Validate inputs */
+    if (payload_len > EVT_INLINE_MAX){
+        return false;
+    }
+    if (evt_id >= EVT_BUS_MAX_EVT_IDS){
+        return false;
+    }
 
+    if (payload_len > 0 && payload == NULL) 
+    {
+        return false;
+    }
+
+    if (evt_bus_backend.enqueue_isr == NULL) {
+        return false;
+    }
+
+    evt_t evt = {0};
+    evt.id = evt_id;
+    evt.len = (uint16_t)payload_len;
+    if (payload_len) {
+        memcpy(evt.payload, payload, payload_len);
+    }
+
+    /* Send callback to dispatcher queue */
+    return evt_bus_backend.enqueue_isr(&evt);
+}
 
 void evt_bus_dispatch_evt(const evt_t *evt)
 {

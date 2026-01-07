@@ -45,11 +45,11 @@ typedef struct {
   /* Enqueue a message (thread context). Returns false on full/failure. */
   bool (*enqueue)(const evt_t *evt);
 
-  /* Dequeue a message WITHOUT blocking. Returns true if msg written. */
-  bool (*dequeue_nb)(void* ctx, evt_t* evt_out);
-
   /* Dequeue a message WITH blocking/wait. Returns true if msg written. */
   bool (*dequeue_block)(void* ctx, evt_t* evt_out);
+
+  /* Optional: Dequeue a message WITHOUT blocking. Returns true if msg written. */
+  bool (*dequeue_nb)(void* ctx, evt_t* evt_out);
 
   /* Optional: ISR-safe enqueue (NULL if not supported). */
   bool (*enqueue_isr)(const evt_t *evt);
@@ -57,6 +57,9 @@ typedef struct {
   /* Optional: protect subscribe/unsubscribe vs dispatch if needed (NULL if not used). */
   void (*lock)(void* ctx);
   void (*unlock)(void* ctx);
+
+  /* Optional: backend init function (NULL if not used). */
+  bool (*init)(void);
 
 } evt_bus_backend_t;
 

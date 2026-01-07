@@ -1,0 +1,37 @@
+menu "Event Bus (evt_bus) ESP-IDF Port"
+
+config EVT_BUS_PORT_TASK_NAME
+    string "Dispatcher task name"
+    default "evt_bus"
+    help
+        Name of the dispatcher task created by the ESP-IDF (FreeRTOS) port.
+
+config EVT_BUS_PORT_TASK_PRIO
+    int "Dispatcher task priority"
+    range 0 25
+    default 1
+    help
+        FreeRTOS task priority for the event bus dispatcher.
+
+config EVT_BUS_PORT_STACK_WORDS
+    int "Dispatcher stack size (words)"
+    range 256 65535
+    default 2048
+    help
+        Stack size in words for the dispatcher task.
+
+config EVT_BUS_PORT_QUEUE_DEPTH
+    int "Event queue depth"
+    range 1 1024
+    default 16
+    help
+        Number of evt_t entries the backend queue can hold.
+
+config EVT_BUS_PORT_HEARTBEAT_TICK_MS
+    int "Heartbeat tick interval (ms, 0 = disabled)"
+    range 0 60000
+    default 0
+    help
+        If >0, dispatcher wakes periodically and updates heartbeat observability.
+
+endmenu

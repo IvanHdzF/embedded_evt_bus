@@ -1,6 +1,10 @@
 #ifndef EVT_BUS_CONFIG_H
 #define EVT_BUS_CONFIG_H
 
+#include <limits.h>
+#include <stdint.h>
+
+
 /* EVT_BUS_CONFIG_H
  *
  * Configuration options for the Event Bus.
@@ -28,10 +32,7 @@
 #define EVT_BUS_MAX_HANDLES (EVT_BUS_MAX_SUBSCRIBERS_PER_EVT * EVT_BUS_MAX_EVT_IDS)
 #endif
 
-/* Define specific RTOS */
-/* For FreeRTOS */
-#define EVT_BUS_USE_FREERTOS
-
-// TODO: Port other RTOSes here
+_Static_assert(EVT_INLINE_MAX <= UINT16_MAX,
+               "EVT_INLINE_MAX must fit in uint16_t");
 
 #endif /* EVT_BUS_CONFIG_H */
