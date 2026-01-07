@@ -31,13 +31,15 @@ Key properties:
 ├── src/
 │   └── evt_bus.c
 ├── ports/
-│   └── freertos/        # (optional, future)
+│   ├── freertos/              # FreeRTOS backend + helpers
+│   └── esp-idf/
+│       └── evt_bus/           # ESP-IDF component wrapper (CMakeLists.txt + Kconfig)
 ├── tests/
 │   ├── test_evt_bus.c
 │   ├── fake_evt_bus_backend.c
 │   └── test_helpers.h
 ├── externals/
-│   └── unity/           # Unity test framework (git submodule)
+│   └── unity/                 # Unity test framework (git submodule)
 ├── docs/
 │   └── DESIGN.md
 ├── CMakeLists.txt
@@ -135,29 +137,52 @@ A port typically provides:
 
 ### FreeRTOS
 
-`ports/freertos/` provides a thin backend implementation using the FreeRTOS queue + a dispatcher task.
+`ports/freertos/` provides a thin backend implementation using the FreeRTOS queue and an optional dispatcher task wrapper.
 
 **Important:** this repository does **not** vendor FreeRTOS. The FreeRTOS port is intended to be built **inside a consumer project** that already has FreeRTOS configured.
 
 Your application must provide the normal FreeRTOS include environment, including:
-
 - `FreeRTOS.h`
 - `FreeRTOSConfig.h` (application/project-specific)
-- `portmacro.h` (comes from the selected FreeRTOS *portable* layer)
+- `portmacro.h` (from the selected FreeRTOS portable layer)
 
-In other words: if your FreeRTOS app already builds, adding `evt_bus` + enabling the FreeRTOS port should “just work”.
+If your FreeRTOS application already builds, adding `evt_bus` and enabling the FreeRTOS port should “just work”.
 
-**This repo only validates:**
-- core behavior via Unity unit tests (`make test`)
-- optional host compile-check of the FreeRTOS port using stub headers (no real RTOS runtime)
+This repository validates:
+- core behavior via Unity unit tests
+- host-side compile checks of the FreeRTOS port using stub headers (no RTOS runtime)
 
 > See `ports/freertos/` for the port implementation.
 
-#### Build selection (CMake)
+---
 
-- FreeRTOS port: build `evt_bus_port_freertos` (consumer must supply FreeRTOS headers/config)
+### ESP-IDF
 
-This project intentionally does not attempt to build FreeRTOS itself.
+For ESP-IDF users, this repository provides a ready-to-use ESP-IDF component wrapper.
+
+**Component path:**
+
+```
+ports/esp-idf/evt_bus
+```
+
+To add `evt_bus` to your ESP-IDF application, extend `EXTRA_COMPONENT_DIRS`
+to point to the **parent directory**:
+
+```cmake
+set(EXTRA_COMPONENT_DIRS
+    "${CMAKE_CURRENT_LIST_DIR}/path/to/evt_bus/ports/esp-idf"
+)
+```
+
+Then include the API normally:
+
+```c
+#include "evt_bus/evt_bus.h"
+```
+
+Kconfig options for the FreeRTOS port (heartbeat, observability hooks, etc.)
+are exposed automatically when the component is enabled.
 
 ---
 
@@ -189,6 +214,37 @@ ctest --test-dir build
 
 All core behavior (subscribe, publish, dispatch, unsubscribe, self-healing)
 is covered by unit tests.
+
+---
+
+## Makefile CLI
+
+The repository includes a small Makefile wrapper around CMake for convenience.
+
+### Variables
+- `BUILD_DIR` (default: `build`)
+- `BUILD_TYPE` (default: `Debug`)
+- `GENERATOR` (default: `MinGW Makefiles`)
+- `CMAKE_ARGS` (default: empty; extra args forwarded to CMake)
+- `FREERTOS_INC` (default: empty; semicolon-separated include dirs)
+- `FREERTOS_CFG` (default: empty; additional include dir for your `FreeRTOSConfig.h`)
+
+### Commands
+- `make build` — configure + build (default target is `all -> build`)
+- `make test` — build and run Unity unit tests (`EVT_BUS_BUILD_TESTS=ON`, FreeRTOS port disabled)
+- `make port_freertos_stub` — compile-check the FreeRTOS port against stub headers (no RTOS runtime)
+- `make port_freertos_real` — build the FreeRTOS port using real FreeRTOS headers (pass include dirs)
+- `make clean` — remove the build directory
+- `make rebuild` — `clean` then `build`
+
+### Example: build FreeRTOS port with real headers
+
+```sh
+make port_freertos_real \
+  FREERTOS_INC="/path/to/FreeRTOS/Source/include;/path/to/FreeRTOS/Source/portable/COMPILER/PORT" \
+  FREERTOS_CFG="/path/to/your/app/include"
+```
+
 
 ---
 
