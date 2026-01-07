@@ -87,6 +87,24 @@ void evt_bus_unsubscribe(evt_sub_handle_t handle);
 bool evt_bus_publish(evt_id_t evt_id, const void *payload, size_t payload_len);
 
 /**
+ * @brief Publish an event from an ISR context (enqueue-only).
+ *
+ * Copies the payload bytes inline into the event envelope and enqueues to the backend
+ * using an ISR-safe enqueue function if provided.
+ *
+ * @param evt_id       Event identifier to publish.
+ * @param payload      Pointer to payload bytes (may be NULL if @p payload_len == 0).
+ * @param payload_len  Number of payload bytes to copy. Must be <= EVT_INLINE_MAX.
+ *
+ * @return true if the event was accepted/enqueued, false otherwise (invalid args, queue full,
+ *         or backend enqueue failure).
+ *
+ * @note This function does not execute callbacks.
+ * @note Requires that the backend provides an ISR-safe enqueue function.
+ */
+bool evt_bus_publish_from_isr(evt_id_t evt_id, const void *payload, size_t payload_len);
+
+/**
  * @brief Dispatch (fan out) a single event to all subscribers of evt->id.
  *
  * Called by the platform dispatcher after dequeueing an event from the backend queue.

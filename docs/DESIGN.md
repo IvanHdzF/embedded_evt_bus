@@ -54,7 +54,10 @@ The bus is split into:
 **Does NOT depend on**
 - FreeRTOS headers or types
 - Dynamic allocation
-- Any specific queue or mutex implementation
+- Any specific queue, mutex, or timing primitive
+- Periodic wakeups or timers
+
+The core is suitable for RTOS-based systems *and* bare-metal systems.
 
 ---
 
@@ -65,11 +68,76 @@ The bus is split into:
 - Dispatcher task or loop
 - Optional ISR-safe publish helper
 - Optional locking primitives
+- Optional observability hooks (platform-specific)
 
 The port owns:
 - the queue object
-- the dispatcher thread
-- any RTOS-specific synchronization
+- the dispatcher execution context
+- any RTOS-specific synchronization or timing behavior
+
+#### Port Configuration (`evt_bus_port_freertos_config.h`)
+
+Platform ports may expose a **port-local configuration header** to control
+platform-specific behavior without affecting the core.
+
+For the FreeRTOS port, configuration is provided via:
+
+`evt_bus_port_freertos_config.h`
+
+Typical configuration options include:
+- Dispatcher task name
+- Task priority
+- Stack size
+- Queue depth
+- Optional heartbeat / observability settings
+
+These options:
+- Are compile-time constants
+- Apply only to the platform port
+- Do not change core semantics or APIs
+
+This pattern is recommended for other ports as well, using a naming convention:
+`evt_bus_port_<platform>_config.h`
+
+Examples:
+- `evt_bus_port_freertos_config.h`
+- `evt_bus_port_zephyr_config.h`
+- `evt_bus_port_baremetal_config.h`
+
+Keeping port configuration isolated:
+- Preserves core portability
+- Avoids `#ifdef` leakage into core code
+- Makes platform behavior explicit and auditable
+
+---
+
+### Optional Observability / Heartbeat (Port-Specific)
+
+Some platform ports (e.g. FreeRTOS) may implement an **optional dispatcher heartbeat**.
+
+Purpose:
+- Allow applications to observe dispatcher liveness
+- Detect stalled or wedged dispatcher tasks
+- Integrate with system-level watchdog or health monitoring
+
+Properties:
+- Implemented **entirely in the port layer**
+- The core does **not** depend on heartbeat
+- No watchdog policy or reset behavior is enforced by `evt_bus`
+
+Example (FreeRTOS port):
+- Dispatcher wakes periodically via bounded `xQueueReceive()`
+- Heartbeat updated on:
+  - idle wakeups
+  - successful event dispatch
+- Port exposes read-only observability APIs
+
+Applications may consume these signals to implement:
+- health monitoring
+- watchdog feeding
+- fault reporting
+
+|> ⚠ Enabling heartbeat implies periodic wakeups and may affect tickless idle / low-power modes.
 
 ---
 
@@ -92,219 +160,10 @@ bool evt_bus_publish(
     size_t payload_len
 );
 
+bool evt_bus_publish_from_isr(
+    evt_id_t evt_id,
+    const void *payload,
+    size_t payload_len
+);
+
 void evt_bus_dispatch_evt(const evt_t *evt);
-```
-
----
-
-## Callback Contract
-
-```c
-typedef void (*evt_cb_t)(const evt_t *evt, void *user_ctx);
-```
-
-- `evt` is the event envelope
-- `user_ctx` is the pointer provided at subscribe time (may be `NULL`)
-- Callbacks execute in dispatcher context
-- Callbacks **must not block**
-
----
-
-## Execution Model
-
-1. **Publish**
-   - `evt_bus_publish()` validates arguments
-   - Copies `(evt_id, payload)` into a bounded queue
-   - Returns immediately
-
-2. **Dispatch**
-   - A platform-owned dispatcher dequeues `evt_t`
-   - Calls `evt_bus_dispatch_evt(evt)`
-   - Fanout executes callbacks sequentially
-
----
-
-## Data Model
-
-### 1) Subscriber Pool (Global)
-
-Indexed by **handle index**.
-
-Each entry contains:
-- callback function pointer
-- `user_ctx`
-- handle `{id, generation}`
-
-A slot is considered **free** when `cb == NULL`.
-
----
-
-### 2) Subscription Table (Per Event)
-
-Indexed by `evt_id`.
-
-Each event owns a **fixed-size array of handles**:
-
-```
-evt_id → [ handle_0, handle_1, ... handle_N ]
-```
-
-Properties:
-- Maximum subscribers per event is compile-time bounded
-- Entries may temporarily contain stale handles
-- Cleaned lazily (self-healing)
-
----
-
-### 3) Event Queue (Port-Owned)
-
-Stores `evt_t` entries:
-- `evt_id`
-- payload length
-- inline payload bytes
-
-Overflow behavior is defined by the backend (recommended: drop-new).
-
----
-
-## Handle Model (Index + Generation)
-
-Handles are opaque values:
-
-```
-handle = { index, generation }
-```
-
-Rules:
-- Each handle slot has a monotonically increasing generation counter
-- A handle is valid **only if index exists AND generation matches**
-- Generation increments whenever a slot is freed/reused
-
-This prevents:
-- stale handles unsubscribing new subscribers
-- dispatch executing the wrong callback after reuse
-
----
-
-## Subscribe Semantics
-
-- Allocate a free handle slot
-- Increment generation
-- Insert handle into the event’s subscription list
-- Store `(cb, user_ctx)` in the subscriber pool
-- Return handle to caller
-
-Failure cases:
-- No free handle slots
-- Event subscription list is full (after repair)
-
----
-
-## Unsubscribe Semantics (Lazy)
-
-- `evt_bus_unsubscribe(handle)`:
-  - invalidates the subscriber pool entry
-  - leaves stale handles in event lists
-
-Rationale:
-- O(1) unsubscribe
-- No global scans
-- Stale entries are cleaned automatically
-
----
-
-## Self-Healing Strategy
-
-Stale handles are removed automatically:
-
-### During Dispatch
-For each handle in the event’s subscription list:
-- validate `(index, generation)`
-- if invalid:
-  - skip callback
-  - clear the handle slot (self-heal)
-
-### During Subscribe
-Before inserting a new handle:
-- stale entries may be reclaimed to make room
-
-Guarantee:
-- Subscription lists do not permanently fill with dead entries
-
----
-
-## Payload Model (Core)
-
-The core uses a **copy-in inline payload model**:
-
-- Payload bytes are stored inside `evt_t`
-- `payload_len == 0` means “no payload”
-- `payload == NULL` is only valid when `payload_len == 0`
-- Maximum payload size is compile-time bounded
-
-Benefits:
-- No lifetime issues
-- Deterministic memory usage
-- Simple mental model
-
----
-
-## Locking Contract
-
-The backend may optionally provide `lock` / `unlock`:
-
-- If used, **both must be provided**
-- Lock protects:
-  - subscriber pool
-  - subscription tables
-- Dispatch:
-  - snapshots callbacks + contexts under lock
-  - releases lock
-  - executes callbacks without holding the lock
-
-This avoids deadlocks and minimizes contention.
-
----
-
-## Threading and Safety Rules
-
-- Callbacks always run in dispatcher context
-- Publish path is thread-safe via backend queue
-- Subscribe / unsubscribe must not race unless backend lock is provided
-- Callbacks may safely call `unsubscribe(self)`
-
----
-
-## Configuration and Limits
-
-All limits are compile-time constants:
-- `EVT_BUS_MAX_EVT_IDS`
-- `EVT_BUS_MAX_HANDLES`
-- `EVT_BUS_MAX_SUBSCRIBERS_PER_EVT`
-- `EVT_INLINE_MAX`
-- Queue depth (backend-defined)
-
-Complexity:
-- `publish()` → O(1)
-- `unsubscribe()` → O(1)
-- `dispatch(evt)` → O(MAX_SUBSCRIBERS_PER_EVT)
-
----
-
-## Behavioral Guarantees
-
-- No callbacks after successful unsubscribe
-- Stale handles cannot affect new subscribers
-- Deterministic execution time per event
-- No heap allocation in core
-- Platform portability
-
----
-
-## Non-Goals
-
-- Priority-based dispatch
-- Wildcard or topic strings
-- Dynamic resizing
-- Unbounded subscribers
-- Executing callbacks in ISR context

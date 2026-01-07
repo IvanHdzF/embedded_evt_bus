@@ -1,8 +1,6 @@
 #include "evt_bus/evt_bus.h"
 #include "evt_bus/evt_bus_config.h"
 
-//TODO: Add necessary includes for backend implementation (e.g., evt_bus_port_freertos)
-
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -184,16 +182,50 @@ bool evt_bus_publish(evt_id_t evt_id, const void *payload, size_t payload_len){
         return false;
     }
 
+    if (evt_bus_backend.enqueue == NULL) {
+        return false;
+    }
+
     evt_t evt = {0};
     evt.id = evt_id;
     evt.len = (uint16_t)payload_len;
-    memcpy(evt.payload, payload, payload_len);
+    if (payload_len) {
+        memcpy(evt.payload, payload, payload_len);
+    }
 
     /* Send callback to dispatcher queue */
     return evt_bus_backend.enqueue(&evt);
 }
 
+bool evt_bus_publish_from_isr(evt_id_t evt_id, const void *payload, size_t payload_len)
+{
+    /* Validate inputs */
+    if (payload_len > EVT_INLINE_MAX){
+        return false;
+    }
+    if (evt_id >= EVT_BUS_MAX_EVT_IDS){
+        return false;
+    }
 
+    if (payload_len > 0 && payload == NULL) 
+    {
+        return false;
+    }
+
+    if (evt_bus_backend.enqueue_isr == NULL) {
+        return false;
+    }
+
+    evt_t evt = {0};
+    evt.id = evt_id;
+    evt.len = (uint16_t)payload_len;
+    if (payload_len) {
+        memcpy(evt.payload, payload, payload_len);
+    }
+
+    /* Send callback to dispatcher queue */
+    return evt_bus_backend.enqueue_isr(&evt);
+}
 
 void evt_bus_dispatch_evt(const evt_t *evt)
 {

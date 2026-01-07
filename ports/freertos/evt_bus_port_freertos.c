@@ -28,6 +28,35 @@
 #define EVT_BUS_QUEUE_DEPTH 16u
 #endif
 
+/* ---- Heartbeat (port-owned) ----------------------------------------------- */
+
+#ifndef EVT_BUS_FREERTOS_HEARTBEAT_TICKS_MS
+#define EVT_BUS_FREERTOS_HEARTBEAT_TICKS_MS 0  /* 0 => disabled (block forever) */
+#endif
+
+typedef struct {
+  volatile TickType_t last_beat;
+  volatile uint32_t   beat_count;
+  volatile uint32_t   events_dispatched;
+} evt_bus_fr_hb_t;
+
+static evt_bus_fr_hb_t s_hb;
+
+static inline void fr_heartbeat_tick(void)
+{
+  s_hb.last_beat = xTaskGetTickCount();
+  s_hb.beat_count++;
+}
+
+static inline void fr_heartbeat_on_dispatch(void)
+{
+  s_hb.events_dispatched++;
+}
+
+/* Function prototypes */
+bool evt_bus_freertos_init(void);
+static void evt_bus_dispatcher_task(void *arg);
+
 /* -------- Port-owned backend state -------- */
 typedef struct {
   QueueHandle_t q;
@@ -56,18 +85,11 @@ static bool fr_enqueue(const evt_t *evt)
   return (xQueueSend(s_ctx.q, evt, 0) == pdPASS);
 }
 
-static bool fr_dequeue_nb(void *ctx, evt_t *evt_out)
-{
-  (void)ctx;
-  if (s_ctx.q == NULL) return false;
-  return (xQueueReceive(s_ctx.q, evt_out, 0) == pdPASS);
-}
-
 static bool fr_dequeue_block(void *ctx, evt_t *evt_out)
 {
   (void)ctx;
   if (s_ctx.q == NULL) return false;
-  return (xQueueReceive(s_ctx.q, evt_out, portMAX_DELAY) == pdPASS);
+  return (xQueueReceive(s_ctx.q, evt_out, pdMS_TO_TICKS(EVT_BUS_FREERTOS_HEARTBEAT_TICKS_MS)) == pdPASS);
 }
 
 static bool fr_enqueue_isr(const evt_t *evt)
@@ -96,27 +118,13 @@ static void fr_unlock(void *ctx)
   (void)xSemaphoreGive(s_mtx);
 }
 
-
-/* -------- Dispatcher task -------- */
-
-static void evt_bus_dispatcher_task(void *arg)
-{
-  (void)arg;
-
-  evt_t evt;
-  for (;;)
-  {
-    /* Block waiting for events */
-    if (evt_bus_backend.dequeue_block(evt_bus_backend.ctx, &evt))
-    {
-      /* Fanout in core */
-      evt_bus_dispatch_evt(&evt);
-    }
-  }
-}
-
-/* -------- Public port API -------- */
-
+/**
+ * @brief Initialize FreeRTOS backend + create dispatcher task.
+ * Returns false on queue/task creation failure.
+ *
+ * @return true 
+ * @return false 
+ */
 bool evt_bus_freertos_init(void)
 {
   /* Create queue before wiring backend */
@@ -129,7 +137,6 @@ bool evt_bus_freertos_init(void)
   /* Wire backend */
   evt_bus_backend.ctx = &s_ctx;
   evt_bus_backend.enqueue = fr_enqueue;
-  evt_bus_backend.dequeue_nb = fr_dequeue_nb;
   evt_bus_backend.dequeue_block = fr_dequeue_block;
   evt_bus_backend.enqueue_isr = fr_enqueue_isr;
 
@@ -149,19 +156,40 @@ bool evt_bus_freertos_init(void)
   return (ok == pdPASS);
 }
 
-bool evt_bus_publish_from_isr(evt_id_t evt_id, const void *payload, uint16_t payload_len)
-{
-  if (payload_len > EVT_INLINE_MAX) return false;
-  if ((payload_len != 0u) && (payload == NULL)) return false;
-  if (evt_bus_backend.enqueue_isr == NULL) return false;
 
-  evt_t e = {0};
-  e.id = evt_id;
-  e.len = payload_len;
-  if (payload_len != 0u)
+/* -------- Dispatcher task -------- */
+
+static void evt_bus_dispatcher_task(void *arg)
+{
+  (void)arg;
+
+  evt_t evt;
+
+#if EVT_BUS_FREERTOS_HEARTBEAT_TICKS_MS > 0
+  const TickType_t to = pdMS_TO_TICKS(EVT_BUS_FREERTOS_HEARTBEAT_TICKS_MS);
+
+  for (;;)
   {
-    for (uint16_t i = 0; i < payload_len; i++)
-      e.payload[i] = ((const uint8_t*)payload)[i];
+    /* Wake periodically to tick heartbeat even when idle */
+    if (xQueueReceive(s_ctx.q, &evt, to) == pdPASS) {
+      evt_bus_dispatch_evt(&evt);
+      fr_heartbeat_on_dispatch();
+    }
+    fr_heartbeat_tick();
   }
-  return evt_bus_backend.enqueue_isr(&e);
+#else
+  for (;;)
+  {
+    /* Pure blocking, no periodic wakeups */
+    if (xQueueReceive(s_ctx.q, &evt, portMAX_DELAY) == pdPASS) {
+      evt_bus_dispatch_evt(&evt);
+    }
+  }
+#endif
 }
+
+/* -------- Public port API -------- */
+
+TickType_t evt_bus_freertos_hb_last_tick(void)      { return s_hb.last_beat; }
+uint32_t   evt_bus_freertos_hb_beat_count(void)     { return s_hb.beat_count; }
+uint32_t   evt_bus_freertos_hb_events_dispatched(void){ return s_hb.events_dispatched; }

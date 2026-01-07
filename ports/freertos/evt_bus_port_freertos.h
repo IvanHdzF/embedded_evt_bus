@@ -3,20 +3,32 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-
-#include "evt_bus/evt_bus_types.h"
+#include "freertos/FreeRTOS.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Initialize FreeRTOS backend + (optionally) create dispatcher task.
- * Returns false on queue/task creation failure.
+/**
+ * @brief Returns the tick count of the last heartbeat beat.
+ * 
+ * @return TickType_t 
  */
-bool evt_bus_freertos_init(void);
+TickType_t evt_bus_freertos_hb_last_tick(void);
 
-/* Optional: ISR-safe publish wrapper (if backend supports enqueue_isr). */
-bool evt_bus_publish_from_isr(evt_id_t evt_id, const void *payload, uint16_t payload_len);
+/**
+ * @brief Returns the number of heartbeat beats since start.
+ * 
+ * @return uint32_t 
+ */
+uint32_t   evt_bus_freertos_hb_beat_count(void);
+
+/**
+ * @brief Returns the number of events dispatched since start.
+ * 
+ * @return uint32_t 
+ */
+uint32_t   evt_bus_freertos_hb_events_dispatched(void);
 
 #ifdef __cplusplus
 }
