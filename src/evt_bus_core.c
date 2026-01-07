@@ -149,6 +149,16 @@ void evt_bus_unsubscribe(evt_sub_handle_t handle){
         return;
     }
 
+    if (subscriber_pool[handle.id].cb == NULL){
+        /* Stale handle */
+        return;
+    }
+
+    if (subscriber_pool[handle.id].handle.gen != handle.gen){
+        /* Stale handle */
+        return;
+    }
+
     evt_bus_backend.lock(evt_bus_backend.ctx);
     /* Remove from subscription slots */
     subscriber_pool[handle.id].cb = NULL;
