@@ -300,16 +300,22 @@ are exposed via Kconfig when the component is enabled.
 
 > This section is for contributors working on the core library.
 
+This repository intentionally keeps the library lean and RTOS-agnostic, so test coverage is split by scope:
+
+- **Core unit tests (host)**: validate core semantics (handles, subscribe/unsubscribe, publish/dispatch fanout, self-heal) using a fake backend.
+- **Port compile checks (host)**: validate the FreeRTOS port compiles against stub headers (no RTOS runtime).
+- **RTOS runtime integration tests**: executed in a consumer project that provides a real RTOS environment and hardware target.
+
+RTOS integration tests live here:
+- `ir_retrofit` (uses `embedded_evt_bus` as the service communication backbone):  
+  https://github.com/IvanHdzF/ir_retrofit - apps/test_evt_bus folder
+
+### Run core tests
+
 ```sh
 git submodule update --init --recursive
 make test
-```
 
-This runs Unity unit and integration tests covering:
-- subscribe / unsubscribe
-- publish / dispatch semantics
-- stale handle safety
-- self-healing subscription lists
 
 ---
 
