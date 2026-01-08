@@ -105,36 +105,46 @@ void evt_bus_init(void){
 
 
 
-evt_sub_handle_t evt_bus_subscribe(evt_id_t evt_id, evt_cb_t cb, void* user_ctx){
-    if (evt_id >= EVT_BUS_MAX_EVT_IDS)
-    {
-        return (evt_sub_handle_t){ .id = EVT_HANDLE_ID_INVALID, .gen = 0 };
+evt_sub_handle_t evt_bus_subscribe(evt_id_t evt_id, evt_cb_t cb, void* user_ctx)
+{
+    evt_sub_handle_t handle = { .id = EVT_HANDLE_ID_INVALID, .gen = 0 };
+    bool locked = false;
+
+    /* Cheap validation first */
+    if (evt_id >= EVT_BUS_MAX_EVT_IDS) return handle;
+    if (cb == NULL) return handle;
+
+    /* Lock once */
+    if (evt_bus_backend.lock) {
+        evt_bus_backend.lock(evt_bus_backend.ctx);
+        locked = true;
     }
 
-    if (cb == NULL){
-        return (evt_sub_handle_t){ .id = EVT_HANDLE_ID_INVALID, .gen = 0 };
-    }
-
-    evt_sub_handle_t handle = {0};
-
-    if (!allocate_handle(&handle)){
-        /* No free handles */
+    /* Allocate handle */
+    if (!allocate_handle(&handle)) {
         handle.id = EVT_HANDLE_ID_INVALID;
         handle.gen = 0;
-        return handle;
+        goto out;
     }
 
-    if(register_subscription_slot(evt_id, handle) == false){
-        /* Failed to register slot */
+    /* Register slot */
+    if (!register_subscription_slot(evt_id, handle)) {
+        /* Optional: release the allocated handle explicitly (not strictly required if cb==NULL marks free) */
+        subscriber_pool[handle.id].cb = NULL;
+        subscriber_pool[handle.id].user_ctx = NULL;
         handle.id = EVT_HANDLE_ID_INVALID;
         handle.gen = 0;
-        return handle;
+        goto out;
     }
 
     subscriber_pool[handle.id].cb = cb;
     subscriber_pool[handle.id].user_ctx = user_ctx;
     subscriptions[evt_id].id = evt_id;
 
+out:
+    if (locked && evt_bus_backend.unlock) {
+        evt_bus_backend.unlock(evt_bus_backend.ctx);
+    }
     return handle;
 }
 
@@ -157,12 +167,17 @@ void evt_bus_unsubscribe(evt_sub_handle_t handle){
         return;
     }
 
-    evt_bus_backend.lock(evt_bus_backend.ctx);
+    if (evt_bus_backend.lock) 
+    {
+        evt_bus_backend.lock(evt_bus_backend.ctx);
+    }
     /* Remove from subscription slots */
     subscriber_pool[handle.id].cb = NULL;
     subscriber_pool[handle.id].user_ctx = NULL;
     subscriber_pool[handle.id].handle.id = EVT_HANDLE_ID_INVALID;
-    evt_bus_backend.unlock(evt_bus_backend.ctx);
+    if (evt_bus_backend.unlock) {
+        evt_bus_backend.unlock(evt_bus_backend.ctx);
+    }
 }
 
 
@@ -245,26 +260,31 @@ void evt_bus_dispatch_evt(const evt_t *evt)
         evt_bus_backend.lock(evt_bus_backend.ctx);
     }
 
-    const evt_subscription_t *subscription = &subscriptions[evt_id];
+    evt_subscription_t *subscription = &subscriptions[evt_id];
 
     for (size_t i = 0; i < EVT_BUS_MAX_SUBSCRIBERS_PER_EVT; i++) {
-        evt_sub_handle_t h = subscription->subscribers[i];
-        if (h.id == EVT_HANDLE_ID_INVALID) 
-        {
+        evt_sub_handle_t *slot = (evt_sub_handle_t *)&subscription->subscribers[i];
+        evt_sub_handle_t h = *slot;
+
+        if (h.id == EVT_HANDLE_ID_INVALID) {
             continue;
         }
+
         /* Validate handle id range (defensive) */
-        if ((size_t)h.id >= EVT_BUS_MAX_HANDLES) 
-        {
+        if ((size_t)h.id >= EVT_BUS_MAX_HANDLES) {
+            /* self-heal: reclaim invalid id slot */
+            slot->id  = EVT_HANDLE_ID_INVALID;
+            slot->gen = 0;
             continue;
         }
+
         const evt_subscriber_t *sub = &subscriber_pool[h.id];
 
         /* Stale handle check */
         if (sub->cb == NULL || sub->handle.gen != h.gen) {
             /* self-heal: reclaim dead slot */
-            h.id = EVT_HANDLE_ID_INVALID;
-            h.gen = 0;
+            slot->id  = EVT_HANDLE_ID_INVALID;
+            slot->gen = 0;
             continue;
         }
 

@@ -9,7 +9,7 @@ The design prioritizes:
 - **Bounded memory usage**
 - **RTOS portability**
 - **Clear execution context separation**
-- **O(1) unsubscribe semantics**
+- **O(1) unsubscribe semantics** (with amortized cleanup)
 
 The bus is split into:
 - a **platform-agnostic core**, and
@@ -21,22 +21,45 @@ The bus is split into:
 
 - **Publish = enqueue only**
   - Publishing an event never executes callbacks.
-  - Safe to call from application tasks (and optionally ISRs via port helpers).
+  - Safe to call from application tasks.
+  - ISR publishing is supported **only if the selected port provides an ISR-safe enqueue**.
 
 - **Dispatch = single worker context**
-  - All callbacks execute in a serialized dispatcher context.
-  - Predictable execution order and timing.
+  - All callbacks execute in a serialized dispatcher context (the port’s dispatcher task or loop).
+  - Callback execution is never performed in the publisher’s context.
 
 - **Bounded resources**
   - No heap allocation in core.
-  - Fixed-size tables and queues.
+  - Fixed-size tables and fixed-size inline payload storage.
 
 - **O(1) unsubscribe**
-  - No global scans on unsubscribe.
-  - Uses handle generation to prevent stale-handle bugs.
+  - `evt_bus_unsubscribe()` invalidates the subscriber entry in O(1) time using handle ID + generation.
+  - Subscription slots are reclaimed lazily (self-healed) during subsequent subscribe or dispatch operations.
 
 - **Self-healing subscription lists**
-  - Stale entries are cleaned lazily during dispatch or subscription.
+  - Stale or invalid subscription slots are cleaned lazily during dispatch and during new subscriptions.
+
+---
+
+## Ordering Guarantees
+
+- **Event ordering:** FIFO by enqueue order (as provided by the port queue backend).
+- **Subscriber ordering:** callbacks for a given `evt_id` are invoked in **subscription-slot order**, which corresponds to **subscription order** in normal operation.
+
+> Ordering is stable assuming the port backend preserves FIFO queue semantics.
+
+---
+
+## Payload Model
+
+`evt_bus` uses a copy-in payload model with an inline, fixed-size buffer.
+
+- **Max payload size:** `EVT_INLINE_MAX` bytes.
+- **Publish behavior on oversize payload:** if `payload_len > EVT_INLINE_MAX`, the publish API returns `false` and the event is not enqueued.
+- **Payload lifetime:** the payload pointer provided to callbacks is valid **only during callback execution**.
+
+Implications for applications:
+- Callbacks that offload work to another task must copy any required payload bytes into application-managed storage (e.g. a worker queue item or memory pool).
 
 ---
 
@@ -45,11 +68,11 @@ The bus is split into:
 ### `evt_bus` Core (platform-agnostic)
 
 **Responsibilities**
-- Subscription handle allocation and validation
+- Subscription handle allocation and validation (ID + generation)
 - Event-to-subscriber fanout logic
 - Generation-based stale handle detection
-- Copy-in payload model
-- Self-healing subscription tables
+- Copy-in payload model (`EVT_INLINE_MAX`)
+- Self-healing subscription tables (lazy reclamation)
 
 **Does NOT depend on**
 - FreeRTOS headers or types
@@ -64,10 +87,10 @@ The core is suitable for RTOS-based systems *and* bare-metal systems.
 ### Platform Port (e.g. FreeRTOS)
 
 **Responsibilities**
-- Event queue backend
+- Event queue backend (FIFO)
 - Dispatcher task or loop
-- Optional ISR-safe publish helper
-- Optional locking primitives
+- Optional ISR-safe publish helper (`enqueue_isr`)
+- Optional locking primitives (`lock` / `unlock`)
 - Optional observability hooks (platform-specific)
 
 The port owns:
@@ -75,10 +98,27 @@ The port owns:
 - the dispatcher execution context
 - any RTOS-specific synchronization or timing behavior
 
-#### Port Configuration (`evt_bus_port_freertos_config.h`)
+---
 
-Platform ports may expose a **port-local configuration header** to control
-platform-specific behavior without affecting the core.
+### Thread-Safety / Locking Contract
+
+The core is written to support concurrent usage, but **thread-safety is provided by the selected backend lock strategy**.
+
+- If `evt_bus_backend.lock` / `unlock` are provided by the port, the core will use them to protect shared state during:
+  - subscribe
+  - unsubscribe
+  - dispatch snapshot
+- If `lock` / `unlock` are `NULL`, the application must ensure serialization externally (e.g. single-threaded or bare-metal usage).
+
+The core itself does not enforce RTOS semantics; it only consumes optional lock hooks if present.
+
+> At initialization time, the core asserts that `lock` and `unlock` are either both NULL or both non-NULL.
+
+---
+
+### Port Configuration (`evt_bus_port_freertos_config.h`)
+
+Platform ports may expose a **port-local configuration header** to control platform-specific behavior without affecting the core.
 
 For the FreeRTOS port, configuration is provided via:
 
@@ -96,22 +136,12 @@ These options:
 - Apply only to the platform port
 - Do not change core semantics or APIs
 
-This pattern is recommended for other ports as well, using a naming convention:
+This pattern is recommended for other ports using:
 `evt_bus_port_<platform>_config.h`
-
-Examples:
-- `evt_bus_port_freertos_config.h`
-- `evt_bus_port_zephyr_config.h`
-- `evt_bus_port_baremetal_config.h`
-
-Keeping port configuration isolated:
-- Preserves core portability
-- Avoids `#ifdef` leakage into core code
-- Makes platform behavior explicit and auditable
 
 ---
 
-### Optional Observability / Heartbeat (Port-Specific)
+## Optional Observability / Heartbeat (Port-Specific)
 
 Some platform ports (e.g. FreeRTOS) may implement an **optional dispatcher heartbeat**.
 
@@ -125,19 +155,20 @@ Properties:
 - The core does **not** depend on heartbeat
 - No watchdog policy or reset behavior is enforced by `evt_bus`
 
-Example (FreeRTOS port):
-- Dispatcher wakes periodically via bounded `xQueueReceive()`
-- Heartbeat updated on:
-  - idle wakeups
-  - successful event dispatch
-- Port exposes read-only observability APIs
+Recommended signals:
+- **Liveness:** last heartbeat tick / beat count
+- **Forward progress:** events dispatched count
 
-Applications may consume these signals to implement:
-- health monitoring
-- watchdog feeding
-- fault reporting
+|> ⚠ Enabling heartbeat implies periodic wakeups and may affect tickless idle or low-power modes.
 
-|> ⚠ Enabling heartbeat implies periodic wakeups and may affect tickless idle / low-power modes.
+---
+
+## Backend Selection Model
+
+`evt_bus` supports a single backend at link time.
+
+- A port must define the global symbol `evt_bus_backend`.
+- `evt_bus_init()` assumes `evt_bus_backend` is already populated by the selected port and calls `evt_bus_backend.init()` if non-NULL.
 
 ---
 
