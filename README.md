@@ -315,7 +315,7 @@ RTOS integration tests live here:
 ```sh
 git submodule update --init --recursive
 make test
-
+```
 
 ---
 
