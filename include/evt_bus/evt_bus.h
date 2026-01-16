@@ -1,6 +1,4 @@
-#ifndef EVT_BUS_H
-#define EVT_BUS_H
-
+#pragma once
 /**
  * @file evt_bus.h
  * @brief Deterministic, bounded publish/subscribe event bus for embedded systems.
@@ -123,5 +121,3 @@ void evt_bus_dispatch_evt(const evt_t *evt);
 #ifdef __cplusplus
 }
 #endif
-
-#endif /* EVT_BUS_H */

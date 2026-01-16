@@ -2,8 +2,12 @@ cmake_minimum_required(VERSION 3.16)
 
 project(evt_bus
   VERSION 0.1.0
-  LANGUAGES C
+  LANGUAGES C CXX
 )
+
+set(CMAKE_CXX_STANDARD 20)          # or 17 if you prefer
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ---------------------------------------------------------------------------
 # Options
@@ -25,7 +29,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 # Core library (RTOS-agnostic)
 # ---------------------------------------------------------------------------
 add_library(evt_bus_core STATIC
-  src/evt_bus_core.c
+  src/evt_bus_core.cpp
 )
 add_library(evt_bus::core ALIAS evt_bus_core)
 
@@ -36,6 +40,10 @@ target_include_directories(evt_bus_core
 )
 
 target_compile_options(evt_bus_core PRIVATE
+  # C++ only
+  $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
+
+  # C and C++
   -Wall -Wextra -Wpedantic
 )
 

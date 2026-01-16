@@ -9,9 +9,7 @@
  *   - If work is heavy/async, callback should enqueue to its own worker/task/queue.
  */
 
-#ifndef EVENT_BUS_TYPES_H
-#define EVENT_BUS_TYPES_H
-
+#pragma once
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -37,6 +35,13 @@ typedef struct {
 typedef struct __attribute__((packed)) {
   hndl_id_t id;
   uint16_t gen; /* generated count */
+
+  #ifdef __cplusplus
+  constexpr bool valid() const noexcept {
+    return gen != 0; /* gen == 0 should be invalid */
+  }
+  #endif
+
 } evt_sub_handle_t;
 
 typedef struct {
@@ -71,4 +76,3 @@ typedef void (*evt_cb_t)(const evt_t *evt, void *user_ctx);
 }
 #endif
 
-#endif /* EVENT_BUS_TYPES_H */
