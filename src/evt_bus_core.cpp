@@ -159,6 +159,9 @@ evt_sub_handle_t EventBus::subscribe(evt_id_t evt_id, evt_cb_t cb, void* user_ct
         subscriber_pool_[handle.id].user_ctx = NULL;
         handle.id = EVT_HANDLE_ID_INVALID;
         handle.gen = 0;
+
+        // optionally keep gen as-is; just mark free
+        return handle;
     }
 
     subscriber_pool_[handle.id].cb = cb;
